@@ -15,14 +15,20 @@
  */
 package com.linkedin.android.testbutler;
 
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Service;
 import android.content.Intent;
 import android.net.wifi.WifiManager;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
+import android.view.accessibility.AccessibilityManager;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * Main entry point into the Test Butler application.
@@ -39,6 +45,7 @@ public class ButlerService extends Service {
     private GsmDataDisabler gsmDataDisabler;
     private PermissionGranter permissionGranter;
     private CommonDeviceLocks locks;
+    private AccessibilityServiceEnabler accessibilityServiceEnabler;
 
     private ButlerApiStubBase butlerApi = new ButlerApiStubBase() {
         @Override
@@ -56,6 +63,26 @@ public class ButlerService extends Service {
         public boolean grantPermission(String packageName, String permission) throws RemoteException {
             return permissionGranter.grantPermission(ButlerService.this, packageName, permission);
         }
+
+        @Override
+        public boolean setAccessibilityServiceState(boolean enabled) throws RemoteException {
+            if (accessibilityServiceEnabler == null) {
+                return false;
+            }
+            return accessibilityServiceEnabler.setAccessibilityServiceEnabled(enabled);
+        }
+
+        @Override
+        public void onDestroy() {
+            super.onDestroy();
+            if (accessibilityServiceEnabler != null) {
+                // Turn the accessibility service off it we enabled it
+                try {
+                    accessibilityServiceEnabler.setAccessibilityServiceEnabled(false);
+                } catch (RemoteException ignored) {
+                }
+            }
+        }
     };
 
     @Override
@@ -68,6 +95,12 @@ public class ButlerService extends Service {
 
         gsmDataDisabler = new GsmDataDisabler();
         permissionGranter = new PermissionGranter();
+        AccessibilityManager accessibilityManager = (AccessibilityManager) getApplicationContext().getSystemService(ACCESSIBILITY_SERVICE);
+        if (accessibilityManager == null) {
+            Log.w(TAG, "No accessibility service! Cannot AccessibilityServiceEnabler");
+        } else {
+            accessibilityServiceEnabler = new AccessibilityServiceEnabler(accessibilityManager, settings);
+        }
         locks = new CommonDeviceLocks();
         locks.acquire(this);
 

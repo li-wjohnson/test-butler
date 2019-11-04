@@ -23,6 +23,7 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
+import android.view.accessibility.AccessibilityManager;
 
 import androidx.annotation.Nullable;
 
@@ -64,6 +65,7 @@ public class ButlerService extends Service {
     private ButlerApi butlerApi;
     private CommonDeviceLocks locks;
     private KeyguardManager.KeyguardLock keyguardLock;
+    private AccessibilityServiceEnabler accessibilityServiceEnabler;
 
     @Override
     public void onCreate() {
@@ -74,6 +76,14 @@ public class ButlerService extends Service {
         try {
             shellBinder = new ShellButlerServiceBinder(this);
             butlerApi = shellBinder.bind(5, TimeUnit.SECONDS);
+
+            AppSettingsAccessor settings = new AppSettingsAccessor(getContentResolver());
+            AccessibilityManager accessibilityManager = (AccessibilityManager) getApplicationContext().getSystemService(ACCESSIBILITY_SERVICE);
+            if (accessibilityManager == null) {
+                Log.w(TAG, "No accessibility service! Cannot AccessibilityServiceEnabler");
+            } else {
+                accessibilityServiceEnabler = new AccessibilityServiceEnabler(accessibilityManager, settings);
+            }
 
             locks = new CommonDeviceLocks();
             locks.acquire(this);
@@ -103,24 +113,32 @@ public class ButlerService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             keyguardLock.reenableKeyguard();
         }
+
+        if (accessibilityServiceEnabler != null) {
+            // Turn the accessibility service off it we enabled it
+            try {
+                accessibilityServiceEnabler.setAccessibilityServiceEnabled(false);
+            } catch (RemoteException ignored) {
+            }
+        }
     }
 
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            return butlerApi.asBinder();
-        }
-
-        // Before 8.1, shell user doesn't have CHANGE_WIFI_STATE privileges, so we have to do it
-        // here instead of in ShellButlerService.
-        // Note that after Android 10, you cannot call setWifiEnabled from an app, so it *must* be
-        // done in ShellButlerService (covered by check above).
         return new ButlerApi.Stub() {
             @Override
             public boolean setWifiState(boolean enabled) throws RemoteException {
-                WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
-                return wifiManager.setWifiEnabled(enabled);
+                // Before 8.1, shell user doesn't have CHANGE_WIFI_STATE privileges, so we have to
+                // do it here instead of in ShellButlerService.
+                // Note that after Android 10, you cannot call setWifiEnabled from an app, so it
+                // *must* be done in ShellButlerService.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) {
+                    WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+                    return wifiManager.setWifiEnabled(enabled);
+                } else {
+                    return butlerApi.setWifiState(enabled);
+                }
             }
 
             @Override
@@ -161,6 +179,14 @@ public class ButlerService extends Service {
             @Override
             public boolean setAlwaysFinishActivitiesState(boolean enabled) throws RemoteException {
                 return butlerApi.setAlwaysFinishActivitiesState(enabled);
+            }
+
+            @Override
+            public boolean setAccessibilityServiceState(boolean enabled) throws RemoteException {
+                if (accessibilityServiceEnabler == null) {
+                    return false;
+                }
+                return accessibilityServiceEnabler.setAccessibilityServiceEnabled(enabled);
             }
         };
     }

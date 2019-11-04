@@ -87,6 +87,12 @@ public class ShellButlerService implements Closeable {
         public boolean grantPermission(String packageName, String permission) throws RemoteException {
             return permissionGranter.grantPermission(packageName, permission);
         }
+
+        @Override
+        public boolean setAccessibilityServiceState(boolean enabled) throws RemoteException {
+            Log.w(TAG, "setAccessibilityServiceState should not be called on ShellButlerService!");
+            return false;
+        }
     };
 
     private ShellButlerService(@NonNull ShellSettingsAccessor settings) {
